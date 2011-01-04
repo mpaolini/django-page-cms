@@ -19,7 +19,7 @@ if settings.PAGE_TAGGING:
     from taggit.managers import TaggableManager
 
 PAGE_CONTENT_DICT_KEY = ContentManager.PAGE_CONTENT_DICT_KEY
-
+PAGE_IS_FIRST_ROOT_KEY = 'pages_is_first_root_%s'
 
 class Page(MPTTModel):
     """
@@ -197,6 +197,10 @@ class Page(MPTTModel):
                 (self.id, name, 0))
 
         cache.delete(self.PAGE_URL_KEY % (self.id))
+        cache.delete(PAGE_IS_FIRST_ROOT_KEY % (self.id))
+        for page in self.get_descendants():
+            cache.delete(self.PAGE_URL_KEY % (page.id))
+            cache.delete(PAGE_IS_FIRST_ROOT_KEY % (page.id))
 
     def get_languages(self):
         """
@@ -220,12 +224,16 @@ class Page(MPTTModel):
 
     def is_first_root(self):
         """Return ``True`` if the page is the first root pages."""
-        if self.parent:
-            return False
-        root_pages = Page.objects.root()
-        if len(root_pages):
-            return Page.objects.root()[0].id == self.id
-        return False
+        #print 'is_first root %s' % self
+        retval = cache.get(PAGE_IS_FIRST_ROOT_KEY % self.id)
+        if retval is not None:
+            return retval
+        try:
+            retval = not self.parent and Page.objects.root()[0].id == self.id
+        except IndexError:
+            retval = False
+        cache.set(PAGE_IS_FIRST_ROOT_KEY % self.id, retval)
+        return retval
 
     def get_url_path(self, language=None):
         """Return the URL's path component. Add the language prefix if
@@ -240,12 +248,11 @@ class Page(MPTTModel):
                 return reverse('pages-root')
             except Exception:
                 pass
-        url = self.get_complete_slug(language)
         if not language:
             language = settings.PAGE_DEFAULT_LANGUAGE
+        url = self.get_complete_slug(language)
         if settings.PAGE_USE_LANGUAGE_PREFIX:
-            return reverse('pages-details-by-path',
-                args=[language, url])
+            return reverse('pages-details-by-path', args=[language, url])
         else:
             return reverse('pages-details-by-path', args=[url])
 
